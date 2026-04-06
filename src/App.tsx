@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { 
   Search, 
   Bell, 
@@ -19,7 +19,18 @@ import {
   ChevronRight,
   Menu,
   Moon,
-  Sun
+  Sun,
+  Activity,
+  Play,
+  Square,
+  Download,
+  ExternalLink,
+  RefreshCw,
+  ShieldAlert,
+  ShieldCheck,
+  Loader2,
+  Clock,
+  BadgeAlert
 } from 'lucide-react';
 
 // --- Mock Data ---
@@ -54,6 +65,7 @@ const Sidebar = ({ activeView, setActiveView, isCollapsed, setIsCollapsed, isDar
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'tracking', label: 'Price Tracking', icon: LineChart },
+    { id: 'monitor', label: 'Price Monitor', icon: Activity },
     { id: 'analytics', label: 'Market Analytics', icon: BarChart2 },
     { id: 'reports', label: 'Summary Reports', icon: FileText },
     { id: 'settings', label: 'Settings', icon: Settings },
@@ -296,6 +308,329 @@ const Dashboard = ({ isDarkMode }: { isDarkMode: boolean }) => {
   );
 };
 
+// ==========================================
+// Price Monitor Component
+// ==========================================
+
+interface ProductRow {
+  name: string;
+  url: string;
+  threshold: number;
+}
+
+interface CheckResult {
+  inspectionTime?: string;
+  productName: string;
+  threshold: number;
+  lowestPrice?: string;
+  lowestPriceNum?: number;
+  lowestPriceSeller?: string;
+  otherViolations?: string;
+  status: 'normal' | 'violation' | 'error' | 'checking' | 'pending';
+  url: string;
+  error?: string;
+}
+
+const csvProducts: ProductRow[] = [
+  { name: 'Archer VR300', url: 'https://www.akakce.com/modem/en-ucuz-tp-link-archer-vr300-1200mbps-vdsl2-fiyati,282052642.html', threshold: 2198 },
+  { name: 'Tapo C210',   url: 'https://www.akakce.com/guvenlik-kamerasi/en-ucuz-tp-link-tapo-c210-ev-guvenligi-icin-pan-tilt-kablosuz-kamera-fiyati,201390126.html', threshold: 1298 },
+  { name: 'TL-MR100',   url: 'https://www.akakce.com/modem/en-ucuz-tp-link-tl-mr100-2-port-300-mbps-fiyati,748565612.html', threshold: 2398 },
+  { name: 'Archer VR400', url: 'https://www.akakce.com/modem/en-ucuz-tp-link-archer-vr400-1200-mbps-vdsl2-fiyati,22537048.html', threshold: 2398 },
+];
+
+const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
+  const cardBg   = isDarkMode ? 'bg-[#212628] border-white/10' : 'bg-white border-[#A7A9AC]/20';
+  const textColor = isDarkMode ? 'text-white' : 'text-[#36444B]';
+  const subText   = 'text-[#A7A9AC]';
+  const rowHover  = isDarkMode ? 'hover:bg-white/5' : 'hover:bg-slate-50/80';
+  const thBg      = isDarkMode ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-[#A7A9AC]/20';
+
+  const [results, setResults] = useState<Record<string, CheckResult>>({});
+  const [checking, setChecking] = useState<Set<string>>(new Set());
+  const [isRunningAll, setIsRunningAll] = useState(false);
+  const stopFlag = useRef(false);
+  const [serverOnline, setServerOnline] = useState<boolean | null>(null);
+
+  // Check server health on mount
+  React.useEffect(() => {
+    fetch('/api/status')
+      .then(r => r.ok ? setServerOnline(true) : setServerOnline(false))
+      .catch(() => setServerOnline(false));
+  }, []);
+
+  const checkProduct = async (product: ProductRow) => {
+    setChecking(prev => new Set(prev).add(product.name));
+    setResults(prev => ({
+      ...prev,
+      [product.name]: { productName: product.name, threshold: product.threshold, url: product.url, status: 'checking' },
+    }));
+
+    try {
+      const resp = await fetch('/api/check-price', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(product),
+      });
+      const data = await resp.json();
+      setResults(prev => ({ ...prev, [product.name]: data }));
+    } catch (e: any) {
+      setResults(prev => ({
+        ...prev,
+        [product.name]: { productName: product.name, threshold: product.threshold, url: product.url, status: 'error', error: e.message },
+      }));
+    }
+
+    setChecking(prev => { const n = new Set(prev); n.delete(product.name); return n; });
+  };
+
+  const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+  const runAll = async () => {
+    stopFlag.current = false;
+    setIsRunningAll(true);
+    for (const product of csvProducts) {
+      if (stopFlag.current) break;
+      await checkProduct(product);
+      if (!stopFlag.current) await delay(2000 + Math.random() * 3000);
+    }
+    setIsRunningAll(false);
+  };
+
+  const stopAll = () => {
+    stopFlag.current = true;
+    setIsRunningAll(false);
+  };
+
+  const exportCSV = () => {
+    const rows = [
+      ['Inspection Time','Product Name','Threshold (TL)','Lowest Price','Lowest Seller','Other Violations','Status','URL'],
+      ...csvProducts.map(p => {
+        const r = results[p.name];
+        if (!r || r.status === 'pending' || r.status === 'checking') {
+          return ['-', p.name, p.threshold, '-', '-', '-', 'Not checked', p.url];
+        }
+        const statusLabel = r.status === 'violation' ? '🚨 Price Violation' : r.status === 'normal' ? '✅ Normal' : '❌ Error';
+        return [r.inspectionTime||'-', r.productName, r.threshold, r.lowestPrice||'-', r.lowestPriceSeller||'-', r.otherViolations||'-', statusLabel, r.url];
+      })
+    ];
+    const csv = rows.map(row => row.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob(['\uFEFF'+csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `Price_Report_${new Date().toISOString().slice(0,16).replace(/[:-]/g,'')}.csv`;
+    link.click();
+  };
+
+  const totalChecked  = csvProducts.filter(p => results[p.name] && !['checking','error'].includes(results[p.name]?.status)).length;
+  const totalViolations = csvProducts.filter(p => results[p.name]?.status === 'violation').length;
+  const totalNormal    = csvProducts.filter(p => results[p.name]?.status === 'normal').length;
+  const totalErrors    = csvProducts.filter(p => results[p.name]?.status === 'error').length;
+
+  const StatusBadge = ({ result }: { result?: CheckResult }) => {
+    if (!result || result.status === 'pending') return <span className={`text-xs ${subText}`}>—</span>;
+    if (result.status === 'checking') return (
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-[#00A3DF]/10 text-[#00A3DF] border border-[#00A3DF]/20">
+        <Loader2 size={12} className="animate-spin" /> Kontrol ediliyor...
+      </span>
+    );
+    if (result.status === 'error') return (
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-[#C11C66]/10 text-[#C11C66] border border-[#C11C66]/20">
+        <AlertCircle size={12} /> Hata
+      </span>
+    );
+    if (result.status === 'violation') return (
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-[#C11C66]/10 text-[#C11C66] border border-[#C11C66]/20">
+        <ShieldAlert size={12} /> İhlal Tespit Edildi
+      </span>
+    );
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-[#4ACBD6]/10 text-[#4ACBD6] border border-[#4ACBD6]/20">
+        <ShieldCheck size={12} /> Normal
+      </span>
+    );
+  };
+
+  return (
+    <div className="p-4 sm:p-8 space-y-6 animate-in fade-in duration-500">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 className={`text-2xl font-bold ${textColor}`}>Price Monitor</h2>
+          <p className={`mt-1 ${subText}`}>Akakçe'deki TP-Link ürün fiyatlarını rakiplerle karşılaştırın.</p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Server Status Pill */}
+          <div className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border ${
+            serverOnline === null ? 'bg-[#A7A9AC]/10 text-[#A7A9AC] border-[#A7A9AC]/20' :
+            serverOnline ? 'bg-[#4ACBD6]/10 text-[#4ACBD6] border-[#4ACBD6]/20' :
+            'bg-[#C11C66]/10 text-[#C11C66] border-[#C11C66]/20'
+          }`}>
+            <span className={`w-2 h-2 rounded-full ${
+              serverOnline === null ? 'bg-[#A7A9AC]' : serverOnline ? 'bg-[#4ACBD6] animate-pulse' : 'bg-[#C11C66]'
+            }`} />
+            {serverOnline === null ? 'Sunucu yükleniyor...' : serverOnline ? 'API Hazır' : 'API Offline – npm run server'}
+          </div>
+          <button
+            onClick={exportCSV}
+            disabled={Object.keys(results).length === 0}
+            className={`flex items-center gap-2 px-4 py-2 border rounded-lg text-sm font-medium transition-colors disabled:opacity-40 ${
+              isDarkMode ? 'border-white/20 text-white hover:bg-white/10' : 'border-[#A7A9AC]/40 text-[#36444B] hover:bg-slate-50'
+            }`}
+          >
+            <Download size={16} /> CSV İndir
+          </button>
+          {isRunningAll ? (
+            <button
+              onClick={stopAll}
+              className="flex items-center gap-2 px-4 py-2 bg-[#C11C66] text-white rounded-lg hover:bg-[#C11C66]/90 text-sm font-medium transition-colors shadow-sm"
+            >
+              <Square size={16} /> Durdur
+            </button>
+          ) : (
+            <button
+              onClick={runAll}
+              disabled={!serverOnline}
+              className="flex items-center gap-2 px-4 py-2 bg-[#00A3DF] text-white rounded-lg hover:bg-[#00A3DF]/90 text-sm font-medium transition-colors shadow-sm disabled:opacity-40"
+            >
+              <Play size={16} /> Tümünü Kontrol Et
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {[
+          { label: 'Toplam Ürün', value: csvProducts.length, color: 'text-[#00A3DF]', bg: 'bg-[#00A3DF]/10', icon: Package },
+          { label: 'Kontrol Edildi', value: totalChecked, color: 'text-[#4ACBD6]', bg: 'bg-[#4ACBD6]/10', icon: CheckCircle2 },
+          { label: 'İhlal Tespit', value: totalViolations, color: 'text-[#C11C66]', bg: 'bg-[#C11C66]/10', icon: BadgeAlert },
+          { label: 'Normal', value: totalNormal, color: 'text-[#FFCB00]', bg: 'bg-[#FFCB00]/10', icon: ShieldCheck },
+        ].map(({ label, value, color, bg, icon: Icon }) => (
+          <div key={label} className={`p-4 rounded-xl border shadow-sm ${cardBg}`}>
+            <div className="flex items-center justify-between mb-2">
+              <span className={`text-xs font-medium ${subText}`}>{label}</span>
+              <div className={`p-1.5 rounded-lg ${bg} ${color}`}><Icon size={14} /></div>
+            </div>
+            <p className={`text-2xl font-bold ${color}`}>{value}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Server Offline Warning */}
+      {serverOnline === false && (
+        <div className="flex items-start gap-3 p-4 rounded-xl bg-[#FFCB00]/10 border border-[#FFCB00]/30 text-[#FFCB00]">
+          <AlertTriangle size={20} className="shrink-0 mt-0.5" />
+          <div>
+            <p className="font-semibold text-sm">Scraping API sunucusu çevrimdışı</p>
+            <p className="text-xs mt-1 opacity-80">Ürünleri kontrol etmek için yeni bir terminal açın ve çalıştırın: <code className="font-mono bg-black/20 px-1.5 py-0.5 rounded">npm run server</code></p>
+          </div>
+        </div>
+      )}
+
+      {/* Products Table */}
+      <div className={`border rounded-xl shadow-sm overflow-hidden ${cardBg}`}>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse min-w-[900px]">
+            <thead>
+              <tr className={`border-b text-xs uppercase tracking-wider ${subText} ${thBg}`}>
+                <th className="p-4 font-medium">Ürün Adı</th>
+                <th className="p-4 font-medium">Eşik (₺)</th>
+                <th className="p-4 font-medium">En Düşük Fiyat</th>
+                <th className="p-4 font-medium">Satıcı</th>
+                <th className="p-4 font-medium">İhlal Eden Satıcılar</th>
+                <th className="p-4 font-medium">Son Kontrol</th>
+                <th className="p-4 font-medium">Durum</th>
+                <th className="p-4 font-medium text-center">İşlem</th>
+              </tr>
+            </thead>
+            <tbody className={`divide-y ${isDarkMode ? 'divide-white/5' : 'divide-[#A7A9AC]/10'}`}>
+              {csvProducts.map((product) => {
+                const r = results[product.name];
+                const isChecking = checking.has(product.name);
+                const priceColor = r?.lowestPriceNum && r.lowestPriceNum <= product.threshold
+                  ? 'text-[#C11C66] font-bold'
+                  : textColor;
+
+                return (
+                  <tr key={product.name} className={`transition-colors group ${rowHover}`}>
+                    <td className="p-4">
+                      <div className="flex items-center gap-2">
+                        <span className={`font-semibold ${textColor} group-hover:text-[#00A3DF] transition-colors whitespace-nowrap`}>{product.name}</span>
+                        <a href={product.url} target="_blank" rel="noopener noreferrer" className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-[#A7A9AC] hover:text-[#00A3DF]">
+                          <ExternalLink size={13} />
+                        </a>
+                      </div>
+                    </td>
+                    <td className={`p-4 font-semibold whitespace-nowrap ${textColor}`}>
+                      {product.threshold.toLocaleString('tr-TR')} ₺
+                    </td>
+                    <td className={`p-4 font-semibold whitespace-nowrap ${r ? priceColor : subText}`}>
+                      {r?.lowestPrice ?? <span className="text-xs">—</span>}
+                    </td>
+                    <td className={`p-4 text-sm whitespace-nowrap ${r ? textColor : subText}`}>
+                      {r?.lowestPriceSeller ?? <span className="text-xs">—</span>}
+                    </td>
+                    <td className={`p-4 text-sm max-w-[240px]`}>
+                      {r?.otherViolations ? (
+                        <span className="text-[#C11C66] font-medium break-words">{r.otherViolations}</span>
+                      ) : r?.status === 'normal' ? (
+                        <span className="text-[#4ACBD6] text-xs">İhlal yok</span>
+                      ) : r?.status === 'error' ? (
+                        <span className="text-[#C11C66]/70 text-xs truncate block max-w-[200px]" title={r.error}>{r.error}</span>
+                      ) : (
+                        <span className="text-xs text-[#A7A9AC]">—</span>
+                      )}
+                    </td>
+                    <td className={`p-4 text-xs ${subText} whitespace-nowrap`}>
+                      {r?.inspectionTime ? (
+                        <span className="flex items-center gap-1.5"><Clock size={11} />{r.inspectionTime}</span>
+                      ) : '—'}
+                    </td>
+                    <td className="p-4 whitespace-nowrap">
+                      <StatusBadge result={r} />
+                    </td>
+                    <td className="p-4 text-center">
+                      <button
+                        onClick={() => checkProduct(product)}
+                        disabled={isChecking || isRunningAll || !serverOnline}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-40 ${
+                          isDarkMode
+                            ? 'bg-[#00A3DF]/20 text-[#4ACBD6] hover:bg-[#00A3DF]/30'
+                            : 'bg-[#00A3DF]/10 text-[#00A3DF] hover:bg-[#00A3DF]/20'
+                        }`}
+                      >
+                        {isChecking
+                          ? <><Loader2 size={12} className="animate-spin" /> Kontrol ediliyor</>  
+                          : <><RefreshCw size={12} /> Kontrol Et</>}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Table Footer */}
+        <div className={`p-4 border-t flex items-center justify-between text-xs ${subText} ${
+          isDarkMode ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-[#A7A9AC]/20'
+        }`}>
+          <span>{csvProducts.length} ürün • products.csv'den okunuyor</span>
+          {totalErrors > 0 && (
+            <span className="text-[#C11C66] flex items-center gap-1">
+              <AlertCircle size={12} /> {totalErrors} ürün hata aldı – sayfa yapısı değişmiş olabilir
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ==========================================
+// Price Tracking Component (existing)
+// ==========================================
+
 const PriceTracking = ({ isDarkMode }: { isDarkMode: boolean }) => {
   const cardBg = isDarkMode ? 'bg-[#212628] border-white/10' : 'bg-white border-[#A7A9AC]/20';
   const textColor = isDarkMode ? 'text-white' : 'text-[#36444B]';
@@ -436,7 +771,8 @@ export default function App() {
         <main className="flex-1 overflow-x-hidden">
           {activeView === 'dashboard' && <Dashboard isDarkMode={isDarkMode} />}
           {activeView === 'tracking' && <PriceTracking isDarkMode={isDarkMode} />}
-          {activeView !== 'dashboard' && activeView !== 'tracking' && (
+          {activeView === 'monitor' && <PriceMonitor isDarkMode={isDarkMode} />}
+          {activeView !== 'dashboard' && activeView !== 'tracking' && activeView !== 'monitor' && (
             <div className="p-4 sm:p-8 flex flex-col items-center justify-center h-full text-[#A7A9AC] animate-in fade-in">
               <Package size={48} className="mb-4 opacity-20" />
               <h2 className={`text-xl font-medium text-center ${isDarkMode ? 'text-white' : 'text-[#36444B]'}`}>Module Under Construction</h2>
