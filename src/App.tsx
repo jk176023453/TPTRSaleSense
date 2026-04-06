@@ -350,6 +350,28 @@ const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
   const [isRunningAll, setIsRunningAll] = useState(false);
   const stopFlag = useRef(false);
   const [serverOnline, setServerOnline] = useState<boolean | null>(null);
+  const [expandedRow, setExpandedRow] = useState<string | null>(null);
+
+  // Parse "SellerName(Price TL) | ..." into structured objects
+  const parseViolations = (str: string) => {
+    if (!str) return [];
+    return str.split(' | ').map(v => {
+      const lastParen = v.lastIndexOf('(');
+      if (lastParen === -1) return { name: v.trim(), price: '?', priceNum: 999999, isSpecial: false };
+      const name  = v.substring(0, lastParen).trim();
+      const price = v.substring(lastParen + 1, v.endsWith(')') ? v.length - 1 : v.length).trim();
+      const priceNum = (() => {
+        try { const c = price.replace('TL','').trim(); return parseFloat(c.replace(/\./g,'').replace(',','.')); }
+        catch { return 999999; }
+      })();
+      // Special aggregated rows from Akakçe (not real sellers)
+      const isSpecial = name.includes('Kargo') || name === 'Unknown Seller';
+      return { name, price, priceNum, isSpecial };
+    });
+  };
+
+  const toggleExpand = (name: string) =>
+    setExpandedRow(prev => (prev === name ? null : name));
 
   // Check server health on mount
   React.useEffect(() => {
@@ -530,81 +552,251 @@ const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
       {/* Products Table */}
       <div className={`border rounded-xl shadow-sm overflow-hidden ${cardBg}`}>
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[900px]">
+          <table className="w-full text-left border-collapse min-w-[760px]">
             <thead>
               <tr className={`border-b text-xs uppercase tracking-wider ${subText} ${thBg}`}>
                 <th className="p-4 font-medium">Ürün Adı</th>
                 <th className="p-4 font-medium">Eşik (₺)</th>
-                <th className="p-4 font-medium">En Düşük Fiyat</th>
+                <th className="p-4 font-medium">En Düşük</th>
                 <th className="p-4 font-medium">Satıcı</th>
-                <th className="p-4 font-medium">İhlal Eden Satıcılar</th>
+                <th className="p-4 font-medium">İhlal</th>
                 <th className="p-4 font-medium">Son Kontrol</th>
                 <th className="p-4 font-medium">Durum</th>
                 <th className="p-4 font-medium text-center">İşlem</th>
               </tr>
             </thead>
-            <tbody className={`divide-y ${isDarkMode ? 'divide-white/5' : 'divide-[#A7A9AC]/10'}`}>
+            <tbody>
               {csvProducts.map((product) => {
                 const r = results[product.name];
                 const isChecking = checking.has(product.name);
+                const isExpanded = expandedRow === product.name;
+                const violations = parseViolations(r?.otherViolations || '');
+                const realViolations = violations.filter(v => !v.isSpecial);
+                const hasViolations = violations.length > 0;
+                const canExpand = !!r && r.status !== 'checking';
                 const priceColor = r?.lowestPriceNum && r.lowestPriceNum <= product.threshold
                   ? 'text-[#C11C66] font-bold'
                   : textColor;
 
                 return (
-                  <tr key={product.name} className={`transition-colors group ${rowHover}`}>
-                    <td className="p-4">
-                      <div className="flex items-center gap-2">
-                        <span className={`font-semibold ${textColor} group-hover:text-[#00A3DF] transition-colors whitespace-nowrap`}>{product.name}</span>
-                        <a href={product.url} target="_blank" rel="noopener noreferrer" className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-[#A7A9AC] hover:text-[#00A3DF]">
-                          <ExternalLink size={13} />
-                        </a>
-                      </div>
-                    </td>
-                    <td className={`p-4 font-semibold whitespace-nowrap ${textColor}`}>
-                      {product.threshold.toLocaleString('tr-TR')} ₺
-                    </td>
-                    <td className={`p-4 font-semibold whitespace-nowrap ${r ? priceColor : subText}`}>
-                      {r?.lowestPrice ?? <span className="text-xs">—</span>}
-                    </td>
-                    <td className={`p-4 text-sm whitespace-nowrap ${r ? textColor : subText}`}>
-                      {r?.lowestPriceSeller ?? <span className="text-xs">—</span>}
-                    </td>
-                    <td className={`p-4 text-sm max-w-[240px]`}>
-                      {r?.otherViolations ? (
-                        <span className="text-[#C11C66] font-medium break-words">{r.otherViolations}</span>
-                      ) : r?.status === 'normal' ? (
-                        <span className="text-[#4ACBD6] text-xs">İhlal yok</span>
-                      ) : r?.status === 'error' ? (
-                        <span className="text-[#C11C66]/70 text-xs truncate block max-w-[200px]" title={r.error}>{r.error}</span>
-                      ) : (
-                        <span className="text-xs text-[#A7A9AC]">—</span>
-                      )}
-                    </td>
-                    <td className={`p-4 text-xs ${subText} whitespace-nowrap`}>
-                      {r?.inspectionTime ? (
-                        <span className="flex items-center gap-1.5"><Clock size={11} />{r.inspectionTime}</span>
-                      ) : '—'}
-                    </td>
-                    <td className="p-4 whitespace-nowrap">
-                      <StatusBadge result={r} />
-                    </td>
-                    <td className="p-4 text-center">
-                      <button
-                        onClick={() => checkProduct(product)}
-                        disabled={isChecking || isRunningAll || !serverOnline}
-                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-40 ${
-                          isDarkMode
-                            ? 'bg-[#00A3DF]/20 text-[#4ACBD6] hover:bg-[#00A3DF]/30'
-                            : 'bg-[#00A3DF]/10 text-[#00A3DF] hover:bg-[#00A3DF]/20'
-                        }`}
-                      >
-                        {isChecking
-                          ? <><Loader2 size={12} className="animate-spin" /> Kontrol ediliyor</>  
-                          : <><RefreshCw size={12} /> Kontrol Et</>}
-                      </button>
-                    </td>
-                  </tr>
+                  <React.Fragment key={product.name}>
+                    {/* ── Main Row ── */}
+                    <tr
+                      onClick={() => canExpand && toggleExpand(product.name)}
+                      className={`transition-colors border-b ${
+                        isDarkMode ? 'border-white/5' : 'border-[#A7A9AC]/10'
+                      } ${
+                        canExpand ? 'cursor-pointer' : ''
+                      } ${
+                        isExpanded
+                          ? isDarkMode ? 'bg-white/5' : 'bg-slate-50'
+                          : isDarkMode ? 'hover:bg-white/5' : 'hover:bg-slate-50/80'
+                      }`}
+                    >
+                      {/* Product Name + expand chevron */}
+                      <td className="p-4">
+                        <div className="flex items-center gap-2">
+                          <ChevronRight
+                            size={15}
+                            className={`shrink-0 transition-transform duration-200 ${
+                              isExpanded ? 'rotate-90' : ''
+                            } ${
+                              hasViolations ? 'text-[#C11C66]' : canExpand ? 'text-[#4ACBD6]' : 'text-[#A7A9AC]/30'
+                            }`}
+                          />
+                          <span className={`font-semibold whitespace-nowrap ${
+                            isExpanded
+                              ? isDarkMode ? 'text-[#4ACBD6]' : 'text-[#00A3DF]'
+                              : textColor
+                          }`}>{product.name}</span>
+                          <a
+                            href={product.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={e => e.stopPropagation()}
+                            className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-[#A7A9AC] hover:text-[#00A3DF]"
+                          >
+                            <ExternalLink size={13} />
+                          </a>
+                        </div>
+                      </td>
+
+                      {/* Threshold */}
+                      <td className={`p-4 font-semibold whitespace-nowrap ${textColor}`}>
+                        {product.threshold.toLocaleString('tr-TR')} ₺
+                      </td>
+
+                      {/* Lowest Price */}
+                      <td className={`p-4 font-semibold whitespace-nowrap ${r ? priceColor : subText}`}>
+                        {r?.lowestPrice ?? <span className="text-xs">—</span>}
+                      </td>
+
+                      {/* Lowest Seller */}
+                      <td className={`p-4 text-sm whitespace-nowrap ${r ? textColor : subText}`}>
+                        {r?.lowestPriceSeller ?? <span className="text-xs">—</span>}
+                      </td>
+
+                      {/* Violation Count Badge */}
+                      <td className="p-4">
+                        {hasViolations ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-[#C11C66]/10 text-[#C11C66] border border-[#C11C66]/25">
+                            <ShieldAlert size={11} />
+                            {realViolations.length > 0 ? realViolations.length : violations.length} satıcı
+                          </span>
+                        ) : r?.status === 'normal' ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-[#4ACBD6]/10 text-[#4ACBD6] border border-[#4ACBD6]/20">
+                            <ShieldCheck size={11} /> Yok
+                          </span>
+                        ) : r?.status === 'error' ? (
+                          <span className={`text-xs ${subText}`} title={r.error}>—</span>
+                        ) : (
+                          <span className={`text-xs ${subText}`}>—</span>
+                        )}
+                      </td>
+
+                      {/* Last Check */}
+                      <td className={`p-4 text-xs ${subText} whitespace-nowrap`}>
+                        {r?.inspectionTime
+                          ? <span className="flex items-center gap-1.5"><Clock size={11} />{r.inspectionTime}</span>
+                          : '—'}
+                      </td>
+
+                      {/* Status Badge */}
+                      <td className="p-4 whitespace-nowrap">
+                        <StatusBadge result={r} />
+                      </td>
+
+                      {/* Check Button */}
+                      <td className="p-4 text-center">
+                        <button
+                          onClick={e => { e.stopPropagation(); checkProduct(product); }}
+                          disabled={isChecking || isRunningAll || !serverOnline}
+                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-40 ${
+                            isDarkMode
+                              ? 'bg-[#00A3DF]/20 text-[#4ACBD6] hover:bg-[#00A3DF]/30'
+                              : 'bg-[#00A3DF]/10 text-[#00A3DF] hover:bg-[#00A3DF]/20'
+                          }`}
+                        >
+                          {isChecking
+                            ? <><Loader2 size={12} className="animate-spin" /> Kontrol ediliyor</>
+                            : <><RefreshCw size={12} /> Kontrol Et</>}
+                        </button>
+                      </td>
+                    </tr>
+
+                    {/* ── Expanded Violation Detail Panel ── */}
+                    {isExpanded && (
+                      <tr>
+                        <td
+                          colSpan={8}
+                          className={`p-0 border-b ${
+                            isDarkMode ? 'border-white/5 bg-[#1a2024]' : 'border-[#A7A9AC]/10 bg-slate-50/60'
+                          }`}
+                        >
+                          <div className="px-6 py-5">
+                            {/* Panel Header */}
+                            {hasViolations ? (
+                              <>
+                                <div className="flex items-center gap-3 mb-4">
+                                  <div className="p-1.5 rounded-lg bg-[#C11C66]/10">
+                                    <ShieldAlert size={15} className="text-[#C11C66]" />
+                                  </div>
+                                  <div>
+                                    <h4 className={`font-semibold text-sm ${textColor}`}>
+                                      İhlal Eden Satıcılar
+                                      <span className="ml-2 px-2 py-0.5 rounded-full text-xs bg-[#C11C66]/10 text-[#C11C66]">
+                                        {violations.length}
+                                      </span>
+                                    </h4>
+                                    <p className={`text-xs mt-0.5 ${subText}`}>
+                                      Eşik fiyatı: <span className="font-semibold text-[#FFCB00]">{product.threshold.toLocaleString('tr-TR')} ₺</span>
+                                      {' '}— Bu fiyatın altında satış yapan tüm satıcılar listeleniyor.
+                                    </p>
+                                  </div>
+                                </div>
+
+                                {/* Seller Cards Grid */}
+                                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                                  {violations.map((v, idx) => {
+                                    const diff = product.threshold - v.priceNum;
+                                    const diffPct = isFinite(v.priceNum) && v.priceNum < 999999
+                                      ? ((diff / product.threshold) * 100).toFixed(1)
+                                      : null;
+                                    return (
+                                      <div
+                                        key={idx}
+                                        className={`relative p-3 rounded-xl border transition-all ${
+                                          v.isSpecial
+                                            ? isDarkMode
+                                              ? 'border-dashed border-white/10 bg-white/3 opacity-60'
+                                              : 'border-dashed border-[#A7A9AC]/30 bg-white/40 opacity-70'
+                                            : isDarkMode
+                                              ? 'border-[#C11C66]/20 bg-[#C11C66]/5 hover:bg-[#C11C66]/10'
+                                              : 'border-[#C11C66]/15 bg-[#C11C66]/3 hover:bg-[#C11C66]/8'
+                                        }`}
+                                      >
+                                        {/* Seller Name */}
+                                        <p
+                                          className={`text-xs font-semibold truncate mb-1.5 ${
+                                            v.isSpecial ? subText : 'text-[#C11C66]'
+                                          }`}
+                                          title={v.name}
+                                        >
+                                          {v.name}
+                                        </p>
+
+                                        {/* Price */}
+                                        <p className={`text-base font-bold leading-tight ${textColor}`}>
+                                          {v.price}
+                                        </p>
+
+                                        {/* Diff from Threshold */}
+                                        {diffPct && (
+                                          <div className="mt-2 pt-2 border-t border-[#C11C66]/15">
+                                            <p className="text-xs text-[#C11C66] font-medium">
+                                              −{diff > 0 ? diff.toLocaleString('tr-TR', { maximumFractionDigits: 0 }) : '?'} ₺
+                                              <span className="ml-1 opacity-70">(%{diffPct})</span>
+                                            </p>
+                                          </div>
+                                        )}
+
+                                        {/* Special Label */}
+                                        {v.isSpecial && (
+                                          <span className={`absolute top-2 right-2 text-[10px] px-1.5 py-0.5 rounded ${subText} ${isDarkMode ? 'bg-white/5' : 'bg-[#A7A9AC]/10'}`}>
+                                            Özel
+                                          </span>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </>
+                            ) : r?.status === 'normal' ? (
+                              <div className="flex items-center gap-3 py-2">
+                                <div className="p-1.5 rounded-lg bg-[#4ACBD6]/10">
+                                  <ShieldCheck size={15} className="text-[#4ACBD6]" />
+                                </div>
+                                <div>
+                                  <p className={`text-sm font-semibold ${textColor}`}>İhlal tespit edilmedi</p>
+                                  <p className={`text-xs mt-0.5 ${subText}`}>Tüm satıcılar eşik fiyatın üzerinde satış yapıyor.</p>
+                                </div>
+                              </div>
+                            ) : r?.status === 'error' ? (
+                              <div className="flex items-center gap-3 py-2">
+                                <div className="p-1.5 rounded-lg bg-[#C11C66]/10">
+                                  <AlertCircle size={15} className="text-[#C11C66]" />
+                                </div>
+                                <div>
+                                  <p className="text-sm font-semibold text-[#C11C66]">Scraping hatası</p>
+                                  <p className={`text-xs mt-0.5 ${subText} max-w-xl`}>{r.error}</p>
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 );
               })}
             </tbody>
@@ -615,7 +807,7 @@ const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
         <div className={`p-4 border-t flex items-center justify-between text-xs ${subText} ${
           isDarkMode ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-[#A7A9AC]/20'
         }`}>
-          <span>{csvProducts.length} ürün • products.csv'den okunuyor</span>
+          <span>{csvProducts.length} ürün • products.csv'den okunuyor • Bir ürüne tıklayarak detayları görün</span>
           {totalErrors > 0 && (
             <span className="text-[#C11C66] flex items-center gap-1">
               <AlertCircle size={12} /> {totalErrors} ürün hata aldı – sayfa yapısı değişmiş olabilir
