@@ -30,7 +30,9 @@ import {
   ShieldCheck,
   Loader2,
   Clock,
-  BadgeAlert
+  BadgeAlert,
+  Upload,
+  FilePlus
 } from 'lucide-react';
 
 // --- Mock Data ---
@@ -351,7 +353,13 @@ const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
   const stopFlag = useRef(false);
   const [serverOnline, setServerOnline] = useState<boolean | null>(null);
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
+  const [uploadedProducts, setUploadedProducts] = useState<ProductRow[] | null>(null);
+  const [importError, setImportError]  = useState<string | null>(null);
+  const [isDragging, setIsDragging]    = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Derived list — empty array until a CSV is imported
+  const products: ProductRow[] = uploadedProducts ?? [];
   // Parse "SellerName(Price TL) | ..." into structured objects
   const parseViolations = (str: string) => {
     if (!str) return [];
@@ -373,6 +381,54 @@ const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
   const toggleExpand = (name: string) =>
     setExpandedRow(prev => (prev === name ? null : name));
 
+  // ---- CSV helpers ----
+  const parseCSVRow = (line: string): string[] => {
+    const cells: string[] = [];
+    let cur = '', inQ = false;
+    for (const ch of line) {
+      if (ch === '"') { inQ = !inQ; }
+      else if (ch === ',' && !inQ) { cells.push(cur.trim()); cur = ''; }
+      else cur += ch;
+    }
+    cells.push(cur.trim());
+    return cells;
+  };
+
+  const parseCSV = (text: string): ProductRow[] => {
+    const lines = text.replace(/\r/g, '').trim().split('\n').filter(l => l.trim());
+    if (lines.length < 2) throw new Error('CSV must have a header row and at least one data row.');
+    const headers = parseCSVRow(lines[0]).map(h => h.replace(/^"|"$/g, '').toLowerCase());
+    const ni = headers.indexOf('name'), ui = headers.indexOf('url'), ti = headers.indexOf('threshold');
+    if (ni === -1 || ui === -1 || ti === -1) throw new Error('CSV must contain columns: name, url, threshold');
+    const rows: ProductRow[] = [];
+    for (let i = 1; i < lines.length; i++) {
+      const c = parseCSVRow(lines[i]).map(v => v.replace(/^"|"$/g, ''));
+      const name = c[ni]?.trim(), url = c[ui]?.trim(), threshold = parseFloat(c[ti]?.trim());
+      if (name && url && !isNaN(threshold)) rows.push({ name, url, threshold });
+    }
+    if (rows.length === 0) throw new Error('No valid rows found in the CSV file.');
+    return rows;
+  };
+
+  const handleFile = (file: File) => {
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+      setImportError('Please upload a valid CSV file (.csv).');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const parsed = parseCSV(e.target?.result as string);
+        setUploadedProducts(parsed);
+        setResults({});
+        setExpandedRow(null);
+        setImportError(null);
+      } catch (err: any) { setImportError(err.message); }
+    };
+    reader.readAsText(file, 'utf-8');
+  };
+
+  const handleImportClick = () => fileInputRef.current?.click();
   // Check server health on mount
   React.useEffect(() => {
     fetch('/api/status')
@@ -410,7 +466,7 @@ const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
   const runAll = async () => {
     stopFlag.current = false;
     setIsRunningAll(true);
-    for (const product of csvProducts) {
+    for (const product of products) {
       if (stopFlag.current) break;
       await checkProduct(product);
       if (!stopFlag.current) await delay(2000 + Math.random() * 3000);
@@ -426,7 +482,7 @@ const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
   const exportCSV = () => {
     const rows = [
       ['Inspection Time','Product Name','Threshold (TL)','Lowest Price','Lowest Seller','Other Violations','Status','URL'],
-      ...csvProducts.map(p => {
+      ...products.map(p => {
         const r = results[p.name];
         if (!r || r.status === 'pending' || r.status === 'checking') {
           return ['-', p.name, p.threshold, '-', '-', '-', 'Not checked', p.url];
@@ -443,10 +499,10 @@ const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
     link.click();
   };
 
-  const totalChecked  = csvProducts.filter(p => results[p.name] && !['checking','error'].includes(results[p.name]?.status)).length;
-  const totalViolations = csvProducts.filter(p => results[p.name]?.status === 'violation').length;
-  const totalNormal    = csvProducts.filter(p => results[p.name]?.status === 'normal').length;
-  const totalErrors    = csvProducts.filter(p => results[p.name]?.status === 'error').length;
+  const totalChecked  = products.filter(p => results[p.name] && !['checking','error'].includes(results[p.name]?.status)).length;
+  const totalViolations = products.filter(p => results[p.name]?.status === 'violation').length;
+  const totalNormal    = products.filter(p => results[p.name]?.status === 'normal').length;
+  const totalErrors    = products.filter(p => results[p.name]?.status === 'error').length;
 
   const StatusBadge = ({ result }: { result?: CheckResult }) => {
     if (!result || result.status === 'pending') return <span className={`text-xs ${subText}`}>—</span>;
@@ -492,9 +548,19 @@ const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
             }`} />
             {serverOnline === null ? 'Checking server...' : serverOnline ? 'API Ready' : 'API Offline – npm run server'}
           </div>
+          {products.length > 0 && (
+            <button
+              onClick={handleImportClick}
+              className={`flex items-center gap-2 px-4 py-2 border rounded-lg text-sm font-medium transition-colors ${
+                isDarkMode ? 'border-white/20 text-white hover:bg-white/10' : 'border-[#A7A9AC]/40 text-[#36444B] hover:bg-slate-50'
+              }`}
+            >
+              <Upload size={16} /> Import CSV
+            </button>
+          )}
           <button
             onClick={exportCSV}
-            disabled={Object.keys(results).length === 0}
+            disabled={products.length === 0 || Object.keys(results).length === 0}
             className={`flex items-center gap-2 px-4 py-2 border rounded-lg text-sm font-medium transition-colors disabled:opacity-40 ${
               isDarkMode ? 'border-white/20 text-white hover:bg-white/10' : 'border-[#A7A9AC]/40 text-[#36444B] hover:bg-slate-50'
             }`}
@@ -511,7 +577,7 @@ const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
           ) : (
             <button
               onClick={runAll}
-              disabled={!serverOnline}
+              disabled={!serverOnline || products.length === 0}
               className="flex items-center gap-2 px-4 py-2 bg-[#00A3DF] text-white rounded-lg hover:bg-[#00A3DF]/90 text-sm font-medium transition-colors shadow-sm disabled:opacity-40"
             >
               <Play size={16} /> Check All
@@ -520,23 +586,82 @@ const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
         </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          { label: 'Total Products', value: csvProducts.length, color: 'text-[#00A3DF]', bg: 'bg-[#00A3DF]/10', icon: Package },
-          { label: 'Checked', value: totalChecked, color: 'text-[#4ACBD6]', bg: 'bg-[#4ACBD6]/10', icon: CheckCircle2 },
-          { label: 'Violations', value: totalViolations, color: 'text-[#C11C66]', bg: 'bg-[#C11C66]/10', icon: BadgeAlert },
-          { label: 'Normal', value: totalNormal, color: 'text-[#FFCB00]', bg: 'bg-[#FFCB00]/10', icon: ShieldCheck },
-        ].map(({ label, value, color, bg, icon: Icon }) => (
-          <div key={label} className={`p-4 rounded-xl border shadow-sm ${cardBg}`}>
-            <div className="flex items-center justify-between mb-2">
-              <span className={`text-xs font-medium ${subText}`}>{label}</span>
-              <div className={`p-1.5 rounded-lg ${bg} ${color}`}><Icon size={14} /></div>
-            </div>
-            <p className={`text-2xl font-bold ${color}`}>{value}</p>
+      {/* Hidden file input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".csv"
+        className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ''; }}
+      />
+
+      {/* Import error banner */}
+      {importError && (
+        <div className="flex items-start gap-3 p-4 rounded-xl bg-[#C11C66]/10 border border-[#C11C66]/30">
+          <AlertCircle size={18} className="shrink-0 mt-0.5 text-[#C11C66]" />
+          <div>
+            <p className="font-semibold text-sm text-[#C11C66]">Import failed</p>
+            <p className={`text-xs mt-0.5 ${subText}`}>{importError}</p>
           </div>
-        ))}
-      </div>
+        </div>
+      )}
+
+      {products.length === 0 ? (
+        /* ── Drop Zone ── */
+        <div
+          onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+          onDragEnter={(e) => { e.preventDefault(); setIsDragging(true); }}
+          onDragLeave={() => setIsDragging(false)}
+          onDrop={(e) => { e.preventDefault(); setIsDragging(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
+          onClick={handleImportClick}
+          className={`flex flex-col items-center justify-center py-28 rounded-2xl border-2 border-dashed cursor-pointer transition-all duration-200 select-none ${
+            isDragging
+              ? 'border-[#00A3DF] bg-[#00A3DF]/8 scale-[1.005]'
+              : isDarkMode
+                ? 'border-white/10 hover:border-[#4ACBD6]/40 hover:bg-white/3'
+                : 'border-[#A7A9AC]/25 hover:border-[#00A3DF]/40 hover:bg-[#00A3DF]/3'
+          }`}
+        >
+          <div className={`p-5 rounded-2xl mb-5 transition-colors ${
+            isDragging ? 'bg-[#00A3DF]/15' : isDarkMode ? 'bg-white/5' : 'bg-slate-100'
+          }`}>
+            <Upload size={42} className={`transition-colors ${isDragging ? 'text-[#00A3DF]' : 'text-[#A7A9AC]'}`} />
+          </div>
+          <h3 className={`text-xl font-bold mb-2 transition-colors ${isDragging ? 'text-[#00A3DF]' : textColor}`}>
+            {isDragging ? 'Drop the file here' : 'Import Product List'}
+          </h3>
+          <p className={`text-sm mb-5 ${subText}`}>Drag & drop a CSV file here, or click to browse</p>
+          <div className={`flex items-center gap-2 px-5 py-2.5 rounded-lg border text-sm font-medium ${
+            isDarkMode ? 'border-white/20 text-white' : 'border-[#A7A9AC]/40 text-[#36444B]'
+          }`}>
+            <FilePlus size={15} /> Choose File
+          </div>
+          <p className={`text-xs mt-6 ${subText} text-center max-w-xs`}>
+            Required columns:{' '}
+            <span className="font-mono text-[#00A3DF]">name</span>,{' '}
+            <span className="font-mono text-[#00A3DF]">url</span>,{' '}
+            <span className="font-mono text-[#00A3DF]">threshold</span>
+          </p>
+        </div>
+      ) : (
+        <>
+          {/* Stats Cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {[
+              { label: 'Total Products', value: products.length, color: 'text-[#00A3DF]', bg: 'bg-[#00A3DF]/10', icon: Package },
+              { label: 'Checked', value: totalChecked, color: 'text-[#4ACBD6]', bg: 'bg-[#4ACBD6]/10', icon: CheckCircle2 },
+              { label: 'Violations', value: totalViolations, color: 'text-[#C11C66]', bg: 'bg-[#C11C66]/10', icon: BadgeAlert },
+              { label: 'Normal', value: totalNormal, color: 'text-[#FFCB00]', bg: 'bg-[#FFCB00]/10', icon: ShieldCheck },
+            ].map(({ label, value, color, bg, icon: Icon }) => (
+              <div key={label} className={`p-4 rounded-xl border shadow-sm ${cardBg}`}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className={`text-xs font-medium ${subText}`}>{label}</span>
+                  <div className={`p-1.5 rounded-lg ${bg} ${color}`}><Icon size={14} /></div>
+                </div>
+                <p className={`text-2xl font-bold ${color}`}>{value}</p>
+              </div>
+            ))}
+          </div>
 
       {/* Server Offline Warning */}
       {serverOnline === false && (
@@ -566,7 +691,7 @@ const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
               </tr>
             </thead>
             <tbody>
-              {csvProducts.map((product) => {
+              {products.map((product) => {
                 const r = results[product.name];
                 const isChecking = checking.has(product.name);
                 const isExpanded = expandedRow === product.name;
@@ -807,7 +932,7 @@ const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
         <div className={`p-4 border-t flex items-center justify-between text-xs ${subText} ${
           isDarkMode ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-[#A7A9AC]/20'
         }`}>
-          <span>{csvProducts.length} products • loaded from products.csv • Click a row to view details</span>
+          <span>{products.length} products • loaded from imported CSV • Click a row to view details</span>
           {totalErrors > 0 && (
             <span className="text-[#C11C66] flex items-center gap-1">
               <AlertCircle size={12} /> {totalErrors} product(s) failed – page structure may have changed
@@ -815,6 +940,8 @@ const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
           )}
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 };
