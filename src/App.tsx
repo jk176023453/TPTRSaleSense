@@ -452,17 +452,17 @@ const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
     if (!result || result.status === 'pending') return <span className={`text-xs ${subText}`}>—</span>;
     if (result.status === 'checking') return (
       <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-[#00A3DF]/10 text-[#00A3DF] border border-[#00A3DF]/20">
-        <Loader2 size={12} className="animate-spin" /> Kontrol ediliyor...
+        <Loader2 size={12} className="animate-spin" /> Checking...
       </span>
     );
     if (result.status === 'error') return (
       <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-[#C11C66]/10 text-[#C11C66] border border-[#C11C66]/20">
-        <AlertCircle size={12} /> Hata
+        <AlertCircle size={12} /> Error
       </span>
     );
     if (result.status === 'violation') return (
       <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-[#C11C66]/10 text-[#C11C66] border border-[#C11C66]/20">
-        <ShieldAlert size={12} /> İhlal Tespit Edildi
+        <ShieldAlert size={12} /> Violation Detected
       </span>
     );
     return (
@@ -478,7 +478,7 @@ const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className={`text-2xl font-bold ${textColor}`}>Price Monitor</h2>
-          <p className={`mt-1 ${subText}`}>Akakçe'deki TP-Link ürün fiyatlarını rakiplerle karşılaştırın.</p>
+          <p className={`mt-1 ${subText}`}>Track TP-Link product prices against competitors on Akakçe.</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {/* Server Status Pill */}
@@ -490,7 +490,7 @@ const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
             <span className={`w-2 h-2 rounded-full ${
               serverOnline === null ? 'bg-[#A7A9AC]' : serverOnline ? 'bg-[#4ACBD6] animate-pulse' : 'bg-[#C11C66]'
             }`} />
-            {serverOnline === null ? 'Sunucu yükleniyor...' : serverOnline ? 'API Hazır' : 'API Offline – npm run server'}
+            {serverOnline === null ? 'Checking server...' : serverOnline ? 'API Ready' : 'API Offline – npm run server'}
           </div>
           <button
             onClick={exportCSV}
@@ -499,14 +499,14 @@ const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
               isDarkMode ? 'border-white/20 text-white hover:bg-white/10' : 'border-[#A7A9AC]/40 text-[#36444B] hover:bg-slate-50'
             }`}
           >
-            <Download size={16} /> CSV İndir
+            <Download size={16} /> Export CSV
           </button>
           {isRunningAll ? (
             <button
               onClick={stopAll}
               className="flex items-center gap-2 px-4 py-2 bg-[#C11C66] text-white rounded-lg hover:bg-[#C11C66]/90 text-sm font-medium transition-colors shadow-sm"
             >
-              <Square size={16} /> Durdur
+              <Square size={16} /> Stop
             </button>
           ) : (
             <button
@@ -514,7 +514,7 @@ const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
               disabled={!serverOnline}
               className="flex items-center gap-2 px-4 py-2 bg-[#00A3DF] text-white rounded-lg hover:bg-[#00A3DF]/90 text-sm font-medium transition-colors shadow-sm disabled:opacity-40"
             >
-              <Play size={16} /> Tümünü Kontrol Et
+              <Play size={16} /> Check All
             </button>
           )}
         </div>
@@ -523,9 +523,9 @@ const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
       {/* Stats Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { label: 'Toplam Ürün', value: csvProducts.length, color: 'text-[#00A3DF]', bg: 'bg-[#00A3DF]/10', icon: Package },
-          { label: 'Kontrol Edildi', value: totalChecked, color: 'text-[#4ACBD6]', bg: 'bg-[#4ACBD6]/10', icon: CheckCircle2 },
-          { label: 'İhlal Tespit', value: totalViolations, color: 'text-[#C11C66]', bg: 'bg-[#C11C66]/10', icon: BadgeAlert },
+          { label: 'Total Products', value: csvProducts.length, color: 'text-[#00A3DF]', bg: 'bg-[#00A3DF]/10', icon: Package },
+          { label: 'Checked', value: totalChecked, color: 'text-[#4ACBD6]', bg: 'bg-[#4ACBD6]/10', icon: CheckCircle2 },
+          { label: 'Violations', value: totalViolations, color: 'text-[#C11C66]', bg: 'bg-[#C11C66]/10', icon: BadgeAlert },
           { label: 'Normal', value: totalNormal, color: 'text-[#FFCB00]', bg: 'bg-[#FFCB00]/10', icon: ShieldCheck },
         ].map(({ label, value, color, bg, icon: Icon }) => (
           <div key={label} className={`p-4 rounded-xl border shadow-sm ${cardBg}`}>
@@ -543,8 +543,8 @@ const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
         <div className="flex items-start gap-3 p-4 rounded-xl bg-[#FFCB00]/10 border border-[#FFCB00]/30 text-[#FFCB00]">
           <AlertTriangle size={20} className="shrink-0 mt-0.5" />
           <div>
-            <p className="font-semibold text-sm">Scraping API sunucusu çevrimdışı</p>
-            <p className="text-xs mt-1 opacity-80">Ürünleri kontrol etmek için yeni bir terminal açın ve çalıştırın: <code className="font-mono bg-black/20 px-1.5 py-0.5 rounded">npm run server</code></p>
+            <p className="font-semibold text-sm">Scraping API server is offline</p>
+            <p className="text-xs mt-1 opacity-80">Open a new terminal and run: <code className="font-mono bg-black/20 px-1.5 py-0.5 rounded">npm run server</code></p>
           </div>
         </div>
       )}
@@ -555,14 +555,14 @@ const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
           <table className="w-full text-left border-collapse min-w-[760px]">
             <thead>
               <tr className={`border-b text-xs uppercase tracking-wider ${subText} ${thBg}`}>
-                <th className="p-4 font-medium">Ürün Adı</th>
-                <th className="p-4 font-medium">Eşik (₺)</th>
-                <th className="p-4 font-medium">En Düşük</th>
-                <th className="p-4 font-medium">Satıcı</th>
-                <th className="p-4 font-medium">İhlal</th>
-                <th className="p-4 font-medium">Son Kontrol</th>
-                <th className="p-4 font-medium">Durum</th>
-                <th className="p-4 font-medium text-center">İşlem</th>
+                <th className="p-4 font-medium">Product</th>
+                <th className="p-4 font-medium">Threshold (₺)</th>
+                <th className="p-4 font-medium">Lowest Price</th>
+                <th className="p-4 font-medium">Seller</th>
+                <th className="p-4 font-medium">Violations</th>
+                <th className="p-4 font-medium">Last Check</th>
+                <th className="p-4 font-medium">Status</th>
+                <th className="p-4 font-medium text-center">Action</th>
               </tr>
             </thead>
             <tbody>
@@ -641,11 +641,11 @@ const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
                         {hasViolations ? (
                           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-[#C11C66]/10 text-[#C11C66] border border-[#C11C66]/25">
                             <ShieldAlert size={11} />
-                            {realViolations.length > 0 ? realViolations.length : violations.length} satıcı
+                            {realViolations.length > 0 ? realViolations.length : violations.length} sellers
                           </span>
                         ) : r?.status === 'normal' ? (
                           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-[#4ACBD6]/10 text-[#4ACBD6] border border-[#4ACBD6]/20">
-                            <ShieldCheck size={11} /> Yok
+                            <ShieldCheck size={11} /> None
                           </span>
                         ) : r?.status === 'error' ? (
                           <span className={`text-xs ${subText}`} title={r.error}>—</span>
@@ -678,8 +678,8 @@ const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
                           }`}
                         >
                           {isChecking
-                            ? <><Loader2 size={12} className="animate-spin" /> Kontrol ediliyor</>
-                            : <><RefreshCw size={12} /> Kontrol Et</>}
+                            ? <><Loader2 size={12} className="animate-spin" /> Checking...</>
+                            : <><RefreshCw size={12} /> Check</>}
                         </button>
                       </td>
                     </tr>
@@ -703,14 +703,14 @@ const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
                                   </div>
                                   <div>
                                     <h4 className={`font-semibold text-sm ${textColor}`}>
-                                      İhlal Eden Satıcılar
+                                      Violating Sellers
                                       <span className="ml-2 px-2 py-0.5 rounded-full text-xs bg-[#C11C66]/10 text-[#C11C66]">
                                         {violations.length}
                                       </span>
                                     </h4>
                                     <p className={`text-xs mt-0.5 ${subText}`}>
-                                      Eşik fiyatı: <span className="font-semibold text-[#FFCB00]">{product.threshold.toLocaleString('tr-TR')} ₺</span>
-                                      {' '}— Bu fiyatın altında satış yapan tüm satıcılar listeleniyor.
+                                      Threshold: <span className="font-semibold text-[#FFCB00]">{product.threshold.toLocaleString('tr-TR')} ₺</span>
+                                      {' '}— All sellers pricing below this threshold are listed.
                                     </p>
                                   </div>
                                 </div>
@@ -754,8 +754,8 @@ const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
                                         {diffPct && (
                                           <div className="mt-2 pt-2 border-t border-[#C11C66]/15">
                                             <p className="text-xs text-[#C11C66] font-medium">
-                                              −{diff > 0 ? diff.toLocaleString('tr-TR', { maximumFractionDigits: 0 }) : '?'} ₺
-                                              <span className="ml-1 opacity-70">(%{diffPct})</span>
+                                              −{diff > 0 ? diff.toLocaleString('en-US', { maximumFractionDigits: 0 }) : '?'} ₺
+                                              <span className="ml-1 opacity-70">({diffPct}%)</span>
                                             </p>
                                           </div>
                                         )}
@@ -763,7 +763,7 @@ const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
                                         {/* Special Label */}
                                         {v.isSpecial && (
                                           <span className={`absolute top-2 right-2 text-[10px] px-1.5 py-0.5 rounded ${subText} ${isDarkMode ? 'bg-white/5' : 'bg-[#A7A9AC]/10'}`}>
-                                            Özel
+                                            Special
                                           </span>
                                         )}
                                       </div>
@@ -777,8 +777,8 @@ const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
                                   <ShieldCheck size={15} className="text-[#4ACBD6]" />
                                 </div>
                                 <div>
-                                  <p className={`text-sm font-semibold ${textColor}`}>İhlal tespit edilmedi</p>
-                                  <p className={`text-xs mt-0.5 ${subText}`}>Tüm satıcılar eşik fiyatın üzerinde satış yapıyor.</p>
+                                  <p className={`text-sm font-semibold ${textColor}`}>No violations detected</p>
+                                  <p className={`text-xs mt-0.5 ${subText}`}>All sellers are pricing above the threshold.</p>
                                 </div>
                               </div>
                             ) : r?.status === 'error' ? (
@@ -787,7 +787,7 @@ const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
                                   <AlertCircle size={15} className="text-[#C11C66]" />
                                 </div>
                                 <div>
-                                  <p className="text-sm font-semibold text-[#C11C66]">Scraping hatası</p>
+                                  <p className="text-sm font-semibold text-[#C11C66]">Scraping error</p>
                                   <p className={`text-xs mt-0.5 ${subText} max-w-xl`}>{r.error}</p>
                                 </div>
                               </div>
@@ -807,10 +807,10 @@ const PriceMonitor = ({ isDarkMode }: { isDarkMode: boolean }) => {
         <div className={`p-4 border-t flex items-center justify-between text-xs ${subText} ${
           isDarkMode ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-[#A7A9AC]/20'
         }`}>
-          <span>{csvProducts.length} ürün • products.csv'den okunuyor • Bir ürüne tıklayarak detayları görün</span>
+          <span>{csvProducts.length} products • loaded from products.csv • Click a row to view details</span>
           {totalErrors > 0 && (
             <span className="text-[#C11C66] flex items-center gap-1">
-              <AlertCircle size={12} /> {totalErrors} ürün hata aldı – sayfa yapısı değişmiş olabilir
+              <AlertCircle size={12} /> {totalErrors} product(s) failed – page structure may have changed
             </span>
           )}
         </div>
